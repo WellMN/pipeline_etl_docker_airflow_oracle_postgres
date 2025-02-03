@@ -26,6 +26,8 @@ A extração dos dados é realizada por meio de uma DAG (Directed Acyclic Graph)
 
 ### 2.1 Código da Extração
 
+DAG
+
 ```python
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -112,6 +114,8 @@ trigger_transformacao = TriggerDagRunOperator(
 tarefa_extracao >> trigger_transformacao
 
 ```
+Classe de extração
+
 ```python
 import logging
 import cx_Oracle
@@ -257,6 +261,8 @@ Após a extração, os dados precisam ser transformados. Essa etapa é gerenciad
 
 ### 3.1 Código da Transformação
 
+DAG
+
 ```python
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -353,6 +359,8 @@ trigger_carga = TriggerDagRunOperator(
 # Definindo a ordem das tarefas
 tarefa_transformacao >> trigger_carga
 ```
+Classe de transformação
+
 ```python
 import pandas as pd
 import numpy as np
@@ -531,6 +539,8 @@ A carga dos dados transformados para o banco de dados PostgreSQL é feita pela D
 
 ### 4.1 Código da Carga
 
+DAG
+
 ```python
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -603,6 +613,8 @@ tarefa_carga = PythonOperator(
 )
 
 ```
+Classe de carga
+
 ```python
 import logging
 import psycopg2
