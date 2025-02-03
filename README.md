@@ -2,7 +2,7 @@
 
 O projeto utiliza Docker para conteinerização do processo de ETL com Airflow, Oracle e Postgres.
 
-<img src="img/Docker_Containers.png" alt="Containers" width="500"/>
+<img src="img/Docker_Containers.png" alt="Containers" width="1000"/>
 
 ## 1. Processo de ETL no Airflow
 
