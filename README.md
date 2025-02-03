@@ -112,6 +112,127 @@ trigger_transformacao = TriggerDagRunOperator(
 tarefa_extracao >> trigger_transformacao
 
 ```
+```python
+import logging
+import cx_Oracle
+import pandas as pd
+from typing import Optional
+from pathlib import Path
+from src.config import ConfiguracaoBanco
+
+logger = logging.getLogger(__name__)
+
+class ExtratorOracle:
+    def __init__(self, config: ConfiguracaoBanco):
+        self.config = config
+        self.conexao = None
+
+    def conectar(self) -> None:
+        """Estabelece conexão com o banco Oracle"""
+        try:
+            dsn = cx_Oracle.makedsn(
+                self.config.host,
+                self.config.porta,
+                service_name=self.config.banco
+            )
+            self.conexao = cx_Oracle.connect(
+                user=self.config.usuario,
+                password=self.config.senha,
+                dsn=dsn
+            )
+            logger.info("Conexão com Oracle estabelecida com sucesso")
+        except Exception as erro:
+            logger.error(f"Erro ao conectar com Oracle: {str(erro)}")
+            raise
+
+    def _executar_consulta(self, consulta: str, tamanho_lote: int) -> pd.DataFrame:
+        """Executa consulta SQL e retorna DataFrame"""
+        try:
+            df = pd.read_sql(
+                consulta,
+                self.conexao,
+                chunksize=tamanho_lote
+            )
+            return df
+        except Exception as erro:
+            logger.error(f"Erro ao executar consulta: {str(erro)}")
+            raise
+
+    def extrair_dados_vendas(self, tamanho_lote: int) -> pd.DataFrame:
+        """
+        Extrai dados da tabela SALES_TRANSACTIONS
+        
+        Args:
+            tamanho_lote: Quantidade de registros por lote
+            
+        Returns:
+            DataFrame com os dados extraídos
+        """
+        if not self.conexao:
+            self.conectar()
+
+        try:
+            logger.info("Iniciando extração dos dados de vendas")
+            
+            consulta = """
+                SELECT 
+                    TRANSACTION_ID,
+                    CUSTOMER_ID,
+                    AMOUNT,
+                    TRANSACTION_DATE
+                FROM "SYSTEM"."SALES_TRANSACTIONS" 
+                WHERE TRUNC(TRANSACTION_DATE) = TRUNC(SYSDATE - 1)
+            """
+
+            dataframes = []
+            for chunk in self._executar_consulta(consulta, tamanho_lote):
+                dataframes.append(chunk)
+                logger.debug(f"Lote de {len(chunk)} registros processado")
+
+            df_final = pd.concat(dataframes, ignore_index=True)
+            
+            # Validações básicas
+            if df_final.empty:
+                logger.warning("Nenhum dado encontrado para extração")
+                return pd.DataFrame()
+                
+            logger.info(f"Extração concluída. Total de registros: {len(df_final)}")
+            return df_final
+            
+        except Exception as erro:
+            logger.error(f"Erro durante extração dos dados: {str(erro)}")
+            raise
+        finally:
+            if self.conexao:
+                self.conexao.close()
+                logger.debug("Conexão com Oracle fechada")
+
+    def salvar_dados(self, df: pd.DataFrame, caminho_arquivo: str) -> None:
+        """
+        Salva DataFrame em arquivo Parquet
+        
+        Args:
+            df: DataFrame com os dados
+            caminho_arquivo: Caminho completo do arquivo de saída
+        """
+        try:
+            # Cria diretório se não existir
+            Path(caminho_arquivo).parent.mkdir(parents=True, exist_ok=True)
+            
+            # Salva arquivo
+            df.to_parquet(
+                caminho_arquivo,
+                index=False,
+                compression='snappy'  # Bom equilíbrio entre compressão e velocidade
+            )
+            
+            logger.info(f"Dados salvos com sucesso em: {caminho_arquivo}")
+            
+        except Exception as erro:
+            logger.error(f"Erro ao salvar arquivo: {str(erro)}")
+            raise
+
+```
 
 ### 2.2 Funcionamento
 
@@ -232,7 +353,163 @@ trigger_carga = TriggerDagRunOperator(
 # Definindo a ordem das tarefas
 tarefa_transformacao >> trigger_carga
 ```
+```python
+import pandas as pd
+import numpy as np
+import logging
+from typing import Optional, Dict
+from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
+class TransformadorDadosVendas:
+    def __init__(self):
+        self.metricas = {
+            'registros_iniciais': 0,
+            'registros_invalidos': 0,
+            'registros_processados': 0
+        }
+
+    def _categorizar_valor(self, amount: float) -> str:
+        """
+        Categoriza o valor da transação
+        
+        Args:
+            amount: Valor da transação
+            
+        Returns:
+            category (LOW, MEDIUM, HIGH)
+        """
+        if amount < 100:
+            return 'LOW'
+        elif amount <= 500:
+            return 'MEDIUM'
+        else:
+            return 'HIGH'
+
+    def _validar_dados(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Valida e limpa os dados antes da transformação
+        
+        Args:
+            df: DataFrame com os dados
+            
+        Returns:
+            DataFrame com dados válidos
+        """
+        # Normaliza os nomes das colunas para evitar erro
+        df.columns = df.columns.str.lower()
+
+        # Remove registros com valores nulos
+        df_valido = df.dropna(subset=['transaction_id', 'customer_id', 'amount'])
+        
+        # Remove duplicatas
+        df_valido = df_valido.drop_duplicates(subset=['transaction_id'])
+        
+        # Registra métricas
+        self.metricas['registros_invalidos'] = len(df) - len(df_valido)
+        
+        return df_valido
+
+    def transformar_dados(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Aplica transformações nos dados de vendas
+        
+        Args:
+            df: DataFrame com os dados brutos
+            
+        Returns:
+            DataFrame com dados transformados
+        """
+        try:
+            logger.info("Iniciando transformação dos dados")
+            
+            self.metricas['registros_iniciais'] = len(df)
+            
+            # Validação inicial
+            df_valido = self._validar_dados(df)
+                                    
+            if df_valido.empty:
+                logger.warning("Nenhum dado válido para transformação")
+                return pd.DataFrame()
+            
+            # Aplica transformações
+            df_transformado = df_valido.copy()
+            
+            # Remove registros com valor <= 0
+            df_transformado = df_transformado[df_transformado['amount'] > 0]
+            
+            # Normaliza ID do cliente
+            df_transformado['customer_id'] = df_transformado['customer_id'].str.upper()
+            
+            # Adiciona categoria
+            df_transformado['category'] = df_transformado['amount'].apply(self._categorizar_valor)
+            
+            # Adiciona data de processamento para metadados posteriormente
+            #df_transformado['data_processamento'] = pd.Timestamp.now()
+            
+            # Atualiza métricas
+            self.metricas['registros_processados'] = len(df_transformado)
+            
+            self._registrar_metricas()
+            
+            logger.info("Transformação concluída com sucesso")
+            return df_transformado
+            
+        except Exception as erro:
+            logger.error(f"Erro durante transformação dos dados: {str(erro)}")
+            raise
+
+    def _registrar_metricas(self) -> None:
+        """Registra métricas de processamento"""
+        logger.info("Métricas de transformação:")
+        logger.info(f"- Registros iniciais: {self.metricas['registros_iniciais']}")
+        logger.info(f"- Registros inválidos: {self.metricas['registros_invalidos']}")
+        logger.info(f"- Registros processados: {self.metricas['registros_processados']}")
+
+    def carregar_arquivo(self, caminho_arquivo: str) -> pd.DataFrame:
+        """
+        Carrega dados do arquivo Parquet
+        
+        Args:
+            caminho_arquivo: Caminho do arquivo de entrada
+            
+        Returns:
+            DataFrame com os dados carregados
+        """
+        try:
+            logger.info(f"Carregando dados do arquivo: {caminho_arquivo}")
+            return pd.read_parquet(caminho_arquivo)
+        except Exception as erro:
+            logger.error(f"Erro ao carregar arquivo: {str(erro)}")
+            raise
+
+    def salvar_arquivo(self, df: pd.DataFrame, caminho_arquivo: str) -> None:
+        """
+        Salva dados transformados em arquivo Parquet
+        
+        Args:
+            df: DataFrame com dados transformados
+            caminho_arquivo: Caminho do arquivo de saída
+        """
+        try:
+            # Cria diretório se não existir
+            Path(caminho_arquivo).parent.mkdir(parents=True, exist_ok=True)
+            
+            # Salva arquivo
+            df.to_parquet(
+                caminho_arquivo,
+                index=False,
+                compression='snappy'
+            )
+            
+            logger.info(f"Dados transformados salvos em: {caminho_arquivo}")
+            
+        except Exception as erro:
+            logger.error(f"Erro ao salvar arquivo transformado: {str(erro)}")
+            raise
+
+```
 ### 3.2 Funcionamento
 
 - **Validação**: A transformação inclui validações para remover registros inválidos e duplicados.
@@ -325,6 +602,131 @@ tarefa_carga = PythonOperator(
     dag=dag,
 )
 
+```
+```python
+import logging
+import psycopg2
+import pandas as pd
+from sqlalchemy import create_engine
+from typing import Optional
+from pathlib import Path
+from src.config import ConfiguracaoBanco, Configuracao
+
+logger = logging.getLogger(__name__)
+
+class CargaPostgres:
+    def __init__(self, config: ConfiguracaoBanco):
+        self.config = config
+        self.conexao = None
+        self.engine = None
+        self.metricas = {
+            'registros_inseridos': 0
+        }
+
+    def conectar(self) -> None:
+        #Estabelece conexão com o banco PostgreSQL usando psycopg2 e SQLAlchemy
+        try:
+            # Conexão usando psycopg2 (para operações manuais)
+            self.conexao = psycopg2.connect(
+                host=self.config.host,
+                port=self.config.porta,
+                database=self.config.banco,
+                user=self.config.usuario,
+                password=self.config.senha
+            )
+            logger.info("Conexão com PostgreSQL (psycopg2) estabelecida com sucesso")
+
+            # Conexão usando SQLAlchemy (para to_sql com lotes)
+            self.engine = create_engine(
+                f"postgresql+psycopg2://{self.config.usuario}:{self.config.senha}@{self.config.host}:{self.config.porta}/{self.config.banco}"
+            )
+            logger.info("Conexão com PostgreSQL (SQLAlchemy) estabelecida com sucesso")
+        except Exception as erro:
+            logger.error(f"Erro ao conectar com PostgreSQL: {str(erro)}")
+            raise
+
+    def criar_esquema_tabela(self) -> None:
+        """
+        Cria o esquema 'analytics' e a tabela 'analytics_transactions' se não existirem.
+        """
+        if not self.conexao:
+            self.conectar()
+
+        try:
+            with self.conexao.cursor() as cursor:
+                # Cria o esquema 'analytics' se não existir
+                cursor.execute("CREATE SCHEMA IF NOT EXISTS analytics;")
+                
+                # Cria a tabela 'analytics_transactions' se não existir
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS analytics.analytics_transactions (
+                        transaction_id INTEGER PRIMARY KEY,
+                        customer_id VARCHAR(50),
+                        amount DECIMAL(10,2),
+                        transaction_date TIMESTAMP,
+                        category VARCHAR(20)
+                    );
+                """)
+                self.conexao.commit()
+                logger.info("Esquema e tabela criados ou verificados com sucesso.")
+        except Exception as erro:
+            logger.error(f"Erro ao criar esquema/tabela: {str(erro)}")
+            if self.conexao:
+                self.conexao.rollback()
+            raise
+
+    def carregar_dados(self, caminho_arquivo: str) -> None:
+        """
+        Carrega dados de um arquivo Parquet para o PostgreSQL em lotes.
+        
+        Args:
+            caminho_arquivo: Caminho do arquivo Parquet com os dados transformados
+        """
+        if not self.engine:
+            self.conectar()
+
+        try:
+            logger.info(f"Carregando dados do arquivo {caminho_arquivo} para o PostgreSQL")
+            
+            # Verifica e cria o esquema e a tabela, se necessário
+            self.criar_esquema_tabela()
+            
+            # Lê o arquivo Parquet
+            df = pd.read_parquet(caminho_arquivo)
+            
+            if df.empty:
+                logger.warning("Nenhum dado para carregar")
+                return
+
+            # Carrega dados em lotes
+            df.to_sql(
+                name='analytics_transactions',
+                schema='analytics',
+                con=self.engine,
+                if_exists='append',  # Adiciona os dados à tabela existente
+                index=False,         # Não inclui o índice do DataFrame
+                chunksize=Configuracao.TAMANHO_LOTE,  # Usa o tamanho do lote definido no config.py
+                method='multi'       # Insere múltiplas linhas por vez
+            )
+
+            # Atualiza métricas
+            self.metricas['registros_inseridos'] = len(df)
+            self._registrar_metricas()
+
+            logger.info(f"{len(df)} registros carregados com sucesso em lotes de {Configuracao.TAMANHO_LOTE}")
+
+        except Exception as erro:
+            logger.error(f"Erro durante o carregamento dos dados: {str(erro)}")
+            raise
+        finally:
+            if self.conexao:
+                self.conexao.close()
+                logger.debug("Conexão com PostgreSQL fechada")
+
+    def _registrar_metricas(self) -> None:
+        """Registra métricas de processamento"""
+        logger.info("Métricas de carga:")
+        logger.info(f"- Registros inseridos: {self.metricas['registros_inseridos']}")
 ```
 
 ### 4.2 Funcionamento
