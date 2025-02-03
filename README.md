@@ -1,4 +1,4 @@
-# Exemplo de Pipeline com ETL usando Airflow, Oracle, Postgres e Docker
+# Pipeline com ETL usando Airflow, Oracle, Postgres e Docker
 
 O projeto utiliza Docker para conteinerização do processo de ETL com Airflow, Oracle e Postgres.
 
