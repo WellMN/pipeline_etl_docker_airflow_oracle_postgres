@@ -2,7 +2,7 @@
 
 O projeto utiliza Docker para conteinerização do processo de ETL com Airflow, Oracle e Postgres.
 
-<img src="img/Docker_Containers.png" alt="Agg Gold" width="500"/>
+<img src="img/Docker_Containers.png" alt="Containers" width="500"/>
 
 ## 1. Processo de ETL no Airflow
 
@@ -118,13 +118,13 @@ tarefa_extracao >> trigger_transformacao
 - **Armazenamento**: Os dados extraídos são salvos em um arquivo Parquet para uso posterior na transformação.
 
 ### 2.3 Registros no banco de dados Oracle
-<img src="img/registro_banco_oracle.png" alt="Dags" width="300"/>
+<img src="img/registro_banco_oracle.png" alt="Registros_Oracle" width="300"/>
 
 ### 2.4 Registros extraídos do banco de dados Oracle
-<img src="img/dados_extraidos_sem_transformacao.png" alt="Dags" width="300"/>
+<img src="img/dados_extraidos_sem_transformacao.png" alt="Dados_sem_transformacao" width="300"/>
 
 ### 2.5 Log da execução da extração do Oracle no Airflow
-<img src="img/Log_extracao.png" alt="Dags" width="500"/>
+<img src="img/Log_extracao.png" alt="Log_extracao" width="500"/>
 
 ---
 
@@ -239,10 +239,10 @@ tarefa_transformacao >> trigger_carga
 
 
 ### 3.3 Registros tratados e enriquecidos prontos para carga
-<img src="img/dados_enriquecidos_transformados.png" alt="Dags" width="300"/>
+<img src="img/dados_enriquecidos_transformados.png" alt="dados_enriquecidos" width="300"/>
 
 ### 3.4 Log da execução da transformação dos dados no Airflow
-<img src="img/Log_transformacaocao.png" alt="Dags" width="500"/>
+<img src="img/Log_transformacaocao.png" alt="log_transformacao" width="500"/>
 
 ---
 
@@ -331,10 +331,10 @@ tarefa_carga = PythonOperator(
 - **Carga em Lotes**: Os dados são carregados em lotes, garantindo eficiência e controle de erros.
 
 ### 4.3 Registros carregados no banco de dados Postgres
-<img src="img/registros_carregados_postgres.png" alt="Dags" width="500"/>
+<img src="img/registros_carregados_postgres.png" alt="registros_carregados" width="500"/>
 
 ### 4.4 Log da execução da carga no Postgres no Airflow
-<img src="img/Log_carga.png" alt="Dags" width="500"/>
+<img src="img/Log_carga.png" alt="log_carga" width="500"/>
 
 ---
 
