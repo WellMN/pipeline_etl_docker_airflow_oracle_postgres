@@ -414,8 +414,6 @@ class TransformadorDadosVendas:
         # Remove duplicatas
         df_valido = df_valido.drop_duplicates(subset=['transaction_id'])
         
-        # Registra métricas
-        self.metricas['registros_invalidos'] = len(df) - len(df_valido)
         
         return df_valido
 
@@ -456,6 +454,9 @@ class TransformadorDadosVendas:
             # Adiciona data de processamento para metadados posteriormente
             #df_transformado['data_processamento'] = pd.Timestamp.now()
             
+            # Registra métricas
+            self.metricas['registros_invalidos'] = len(df) - len(df_transformado)
+
             # Atualiza métricas
             self.metricas['registros_processados'] = len(df_transformado)
             
@@ -516,6 +517,7 @@ class TransformadorDadosVendas:
         except Exception as erro:
             logger.error(f"Erro ao salvar arquivo transformado: {str(erro)}")
             raise
+
 
 ```
 ### 3.2 Funcionamento
